@@ -6,6 +6,7 @@ Shared utilities for video generation from sparse frames.
 import sys
 sys.path.append('./extern/dust3r')
 
+import time
 import torch
 import numpy as np
 import torch.nn.functional as F
@@ -297,10 +298,10 @@ def run_diffusion_chunks(render_results, diffusion_model, num_frames, ddim_steps
     return diffusion_results
 
 
-def process_single_scene(image_files, dust3r_model, diffusion_model, device, num_frames=30, ddim_steps=50):
+def process_single_scene(image_files, dust3r_model, diffusion_model, device, num_frames=30, ddim_steps=50, return_stats=False):
     """
     Complete pipeline to process a single scene.
-    
+
     Args:
         image_files: List of 4 image file paths
         dust3r_model: DUSt3R model
@@ -308,57 +309,73 @@ def process_single_scene(image_files, dust3r_model, diffusion_model, device, num
         device: torch device
         num_frames: Number of output frames
         ddim_steps: Number of DDIM steps
-    
+        return_stats: If True, return (results, stats) tuple. Otherwise just return results.
+
     Returns:
-        diffusion_results: Final video frames [num_frames, H, W, 3] in range [-1, 1]
+        If return_stats=False: diffusion_results (Final video frames [num_frames, H, W, 3] in range [-1, 1])
+        If return_stats=True: (diffusion_results, stats_dict)
     """
+    stats = {}
+
     # Load images
+    start = time.time()
     images = load_images(image_files, size=512, force_1024=True)
     imgs_ori = [(img['img_ori'].squeeze(0).permute(1,2,0)+1.)/2. for img in images]
-    
+    stats['load_images'] = time.time() - start
+
     # DUSt3R reconstruction
+    start = time.time()
     pairs = make_pairs(images, scene_graph='complete', prefilter=None, symmetrize=True)
     output = inference(pairs, dust3r_model, device, batch_size=1)
     scene = global_aligner(output, device=device, mode=GlobalAlignerMode.PointCloudOptimizer)
     scene.compute_global_alignment(init='mst', niter=300, schedule='linear', lr=0.01)
     scene = scene.clean_pointcloud()
-    
+    stats['dust3r_reconstruction'] = time.time() - start
+
     # Get camera poses and point clouds
+    start = time.time()
     c2ws = scene.get_im_poses().detach()
     focals = scene.get_focals().detach()
     pps = scene.get_principal_points().detach()
     pcd = [p.detach() for p in scene.get_pts3d(clip_thred=1.0)]
     imgs = np.array(scene.imgs)
-    
+
     # Masks for cleaner point cloud
     scene.min_conf_thr = float(scene.conf_trf(torch.tensor(3.0)))
     masks = scene.get_masks()
     depth = scene.get_depthmaps()
     bgs_mask = [dpt > 0.8*(torch.max(dpt[40:-40,:])+torch.min(dpt[40:-40,:])) for dpt in depth]
     masks = to_numpy([m+mb for m, mb in zip(masks, bgs_mask)])
-    
+
     H, W = int(images[0]['true_shape'][0][0]), int(images[0]['true_shape'][0][1])
-    
-    # Interpolate camera poses
+    stats['extract_geometry'] = time.time() - start
+
+    # Interpolate camera poses and render
+    start = time.time()
     interp_c2ws, interp_focals, interp_pps = interpolate_cameras(
         c2ws, focals, pps, num_frames, device
     )
-    
-    # Render from point cloud
+
     renderer = setup_renderer(interp_c2ws, interp_focals, interp_pps, H, W, device)
     render_results = render_pcd(pcd, imgs, masks, renderer, device)
-    
+
     # Resize to 576x1024
     render_results = F.interpolate(
         render_results.permute(0,3,1,2), size=(576, 1024), mode='bilinear', align_corners=False
     ).permute(0,2,3,1)
-    
+
     # Replace keyframes with originals
     keyframe_indices = np.linspace(0, num_frames-1, len(imgs_ori), dtype=int)
     for idx, img_ori in zip(keyframe_indices, imgs_ori):
         render_results[idx] = img_ori
-    
+    stats['render_pointcloud'] = time.time() - start
+
     # Run diffusion refinement
+    start = time.time()
     diffusion_results = run_diffusion_chunks(render_results, diffusion_model, num_frames, ddim_steps, device)
-    
-    return diffusion_results
+    stats['diffusion_refinement'] = time.time() - start
+
+    if return_stats:
+        return diffusion_results, stats
+    else:
+        return diffusion_results

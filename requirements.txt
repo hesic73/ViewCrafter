@@ -17,6 +17,7 @@ pip
 pyglet
 pytorch-lightning
 PyYAML
+rich
 roma
 scikit-image
 scikit-learn
