@@ -1,6 +1,4 @@
 av
-torch
-torchvision
 
 decord
 einops

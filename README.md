@@ -125,15 +125,19 @@ ViewCrafter can generate high-fidelity novel views from <strong>a single or spar
 
 ### 1. Clone ViewCrafter
 ```bash
-git clone https://github.com/Drexubery/ViewCrafter.git
+git clone https://github.com/hesic73/ViewCrafter.git
 cd ViewCrafter
 ```
 ### 2. Installation
 
 ```bash
 # Create conda environment
-conda create -n viewcrafter python=3.11
+conda create -y -n viewcrafter python=3.11
 conda activate viewcrafter
+
+# match your CUDA version
+pip install torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cu118
+
 pip install -r requirements.txt
 
 pip install -v --no-build-isolation -U git+https://github.com/facebookresearch/xformers.git@main#egg=xformers
