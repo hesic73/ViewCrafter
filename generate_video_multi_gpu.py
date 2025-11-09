@@ -3,7 +3,7 @@
 Multi-GPU batch processing: Generate 30fps videos from 4 sparse frames using ViewCrafter.
 
 Usage:
-    # Process all scenes with all available GPUs
+    # Process all scenes with all available GPUs (skips existing videos by default)
     python generate_video_multi_gpu.py --data_dir /path/to/data --output_dir /path/to/output
 
     # Use specific GPUs
@@ -14,6 +14,12 @@ Usage:
 
     # Process multiple ranges (use -1 for open-ended ranges)
     python generate_video_multi_gpu.py --data_dir /path/to/data --output_dir /path/to/output --ranges "100:200,250:-1" --gpus 0,1,2,3
+
+    # Overwrite existing videos (by default, existing videos are skipped)
+    python generate_video_multi_gpu.py --data_dir /path/to/data --output_dir /path/to/output --overwrite
+
+    # Process specific ranges and overwrite existing videos
+    python generate_video_multi_gpu.py --data_dir /path/to/data --output_dir /path/to/output --ranges "100:200,270:-1" --overwrite --gpus 0,1,2,3
 """
 
 import sys
@@ -146,14 +152,15 @@ def find_scenes(data_dir, ranges=None):
     return all_scenes
 
 
-def find_pending_scenes(data_dir, output_dir, ranges=None):
+def find_pending_scenes(data_dir, output_dir, ranges=None, skip_existing=True):
     """
-    Find scenes that haven't been processed yet (no mp4 file in output_dir).
+    Find scenes that need processing based on range and existence filters.
 
     Args:
         data_dir: Root data directory
         output_dir: Output directory for videos
         ranges: List of (start, end) tuples for filtering
+        skip_existing: If True (default), skip scenes that already have output videos
 
     Returns:
         List of scene_id integers for scenes that need processing
@@ -162,9 +169,13 @@ def find_pending_scenes(data_dir, output_dir, ranges=None):
     pending = []
 
     for scene_id, scene_path in all_scenes:
-        output_path = os.path.join(output_dir, f"{scene_id}.mp4")
-        if not os.path.exists(output_path):
-            pending.append(scene_id)
+        # Apply skip_existing filter
+        if skip_existing:
+            output_path = os.path.join(output_dir, f"{scene_id}.mp4")
+            if os.path.exists(output_path):
+                continue
+        
+        pending.append(scene_id)
 
     return pending
 
@@ -439,6 +450,7 @@ def main():
     parser.add_argument('--data_dir', type=str, required=True, help='Root directory containing scene subdirectories')
     parser.add_argument('--output_dir', type=str, required=True, help='Output directory for videos')
     parser.add_argument('--ranges', type=str, default=None, help='Comma-separated ranges (e.g., "100:200,250:-1"). Use -1 for open-ended. If not specified, processes all scenes.')
+    parser.add_argument('--overwrite', action='store_true', help='Overwrite existing output videos. By default, existing videos are skipped.')
     parser.add_argument('--gpus', type=str, default=None, help='Comma-separated GPU IDs (e.g., "0,1,2,3"). If not specified, uses all available GPUs.')
     parser.add_argument('--ckpt_path', type=str, default='./checkpoints/model_sparse.ckpt')
     parser.add_argument('--dust3r_path', type=str, default='./checkpoints/DUSt3R_ViTLarge_BaseDecoder_512_dpt.pth')
@@ -472,7 +484,8 @@ def main():
 
     # Find pending scenes
     console.print("[bold cyan]Scanning for pending scenes...[/bold cyan]")
-    pending_scenes = find_pending_scenes(args.data_dir, args.output_dir, ranges=ranges)
+    skip_existing = not args.overwrite  # By default skip existing, unless --overwrite is used
+    pending_scenes = find_pending_scenes(args.data_dir, args.output_dir, ranges=ranges, skip_existing=skip_existing)
 
     if not pending_scenes:
         console.print(f"[green]No pending scenes found. All scenes already processed![/green]")
@@ -483,6 +496,10 @@ def main():
     if ranges and ranges != [(None, None)]:
         ranges_str = ", ".join([f"[{s if s is not None else '0'}:{e if e is not None else '∞'})" for s, e in ranges])
         console.print(f"Range filter: {ranges_str}")
+    if args.overwrite:
+        console.print(f"Overwrite mode: [yellow]enabled (will reprocess existing videos)[/yellow]")
+    else:
+        console.print(f"Skip existing: [cyan]enabled (default)[/cyan]")
     console.print(f"Data directory: [cyan]{args.data_dir}[/cyan]")
     console.print(f"Output directory: [cyan]{args.output_dir}[/cyan]")
     console.print(f"Using GPUs: [cyan]{', '.join(map(str, gpu_ids))}[/cyan]\n")
