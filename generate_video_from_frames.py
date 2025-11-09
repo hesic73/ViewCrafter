@@ -33,7 +33,7 @@ def main():
     parser.add_argument('--ddim_steps', type=int, default=50)
     parser.add_argument('--num_frames', type=int, default=30)
     args = parser.parse_args()
-    
+
     seed_everything(args.seed)
     device = torch.device(args.device)
     

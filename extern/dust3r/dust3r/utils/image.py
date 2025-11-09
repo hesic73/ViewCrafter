@@ -14,6 +14,16 @@ os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 import cv2  # noqa
 from PIL import Image, ImageOps
 
+# Handle Pillow API changes (ANTIALIAS removed in Pillow 10.0.0+)
+if hasattr(Image, 'ANTIALIAS'):
+    RESAMPLE_ANTIALIAS = Image.ANTIALIAS
+    RESAMPLE_BICUBIC = Image.BICUBIC
+    RESAMPLE_LANCZOS = Image.LANCZOS
+else:
+    RESAMPLE_ANTIALIAS = Image.Resampling.LANCZOS
+    RESAMPLE_BICUBIC = Image.Resampling.BICUBIC
+    RESAMPLE_LANCZOS = Image.Resampling.LANCZOS
+
 
 def center_crop_pil_image(input_image, target_width=1024, target_height=576):
     w, h = input_image.size
@@ -24,14 +34,14 @@ def center_crop_pil_image(input_image, target_width=1024, target_height=576):
         h = int(h / w_ratio)
         if h < target_height:
             h = target_height
-        input_image = input_image.resize((target_width, h), Image.ANTIALIAS)
+        input_image = input_image.resize((target_width, h), RESAMPLE_ANTIALIAS)
     else:
         w = int(w / h_ratio)
         if w < target_width:
             w = target_width
-        input_image = input_image.resize((w, target_height), Image.ANTIALIAS)
+        input_image = input_image.resize((w, target_height), RESAMPLE_ANTIALIAS)
 
-    return ImageOps.fit(input_image, (target_width, target_height), Image.BICUBIC)
+    return ImageOps.fit(input_image, (target_width, target_height), RESAMPLE_BICUBIC)
 
 try:
     from pillow_heif import register_heif_opener  # noqa
@@ -78,9 +88,9 @@ def rgb(ftensor, true_shape=None):
 def _resize_pil_image(img, long_edge_size):
     S = max(img.size)
     if S > long_edge_size:
-        interp = PIL.Image.LANCZOS
+        interp = RESAMPLE_LANCZOS
     elif S <= long_edge_size:
-        interp = PIL.Image.BICUBIC
+        interp = RESAMPLE_BICUBIC
     new_size = tuple(int(round(x*long_edge_size/S)) for x in img.size)
     return img.resize(new_size, interp)
 

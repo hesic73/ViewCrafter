@@ -132,12 +132,15 @@ cd ViewCrafter
 
 ```bash
 # Create conda environment
-conda create -n viewcrafter python=3.9.16
+conda create -n viewcrafter python=3.11
 conda activate viewcrafter
 pip install -r requirements.txt
 
+pip install -v --no-build-isolation -U git+https://github.com/facebookresearch/xformers.git@main#egg=xformers
+pip install git+https://github.com/mlfoundations/open_clip.git@v2.17.1
+
 # Install PyTorch3D
-conda install https://anaconda.org/pytorch3d/pytorch3d/0.7.5/download/linux-64/pytorch3d-0.7.5-py39_cu117_pyt1131.tar.bz2
+pip install "git+https://github.com/facebookresearch/pytorch3d.git"
 
 # Download pretrained DUSt3R model
 mkdir -p checkpoints/

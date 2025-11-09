@@ -69,14 +69,14 @@ def catmull_rom_interp(points, samples_per_seg=20):
 def interpolate_cameras(c2ws, focals, pps, num_frames, device):
     """
     Interpolate camera poses using Catmull-Rom (positions) + SLERP (rotations).
-    
+
     Args:
-        c2ws: Camera-to-world matrices [N, 3, 4]
+        c2ws: Camera-to-world matrices [N, 3, 4] or [N, 4, 4]
         focals: Focal lengths [N]
         pps: Principal points [N, 2]
         num_frames: Target number of frames
         device: torch device
-    
+
     Returns:
         interp_c2ws: Interpolated camera-to-world matrices [num_frames, 3, 4]
         interp_focals: Interpolated focal lengths [num_frames]
@@ -84,13 +84,18 @@ def interpolate_cameras(c2ws, focals, pps, num_frames, device):
     """
     n = c2ws.shape[0]
     c2ws_np = c2ws.cpu().numpy()
-    
-    # Convert to 4x4
+
+    # Convert to 4x4 (handle both [N, 3, 4] and [N, 4, 4] inputs)
     c2ws_4x4 = []
     for i in range(n):
-        mat = np.eye(4)
-        mat[:3, :] = c2ws_np[i]
-        c2ws_4x4.append(mat)
+        if c2ws_np[i].shape == (4, 4):
+            # Already 4x4
+            c2ws_4x4.append(c2ws_np[i])
+        else:
+            # Convert 3x4 to 4x4
+            mat = np.eye(4)
+            mat[:3, :] = c2ws_np[i]
+            c2ws_4x4.append(mat)
     
     # Extract positions and rotations
     positions = np.array([mat[:3, 3] for mat in c2ws_4x4])
@@ -185,20 +190,20 @@ def setup_renderer(c2ws, focals, pps, H, W, device):
 def render_pcd(pts3d, imgs, masks, renderer, device):
     """
     Render point cloud from given viewpoints.
-    
+
     Args:
         pts3d: List of 3D points [N, H, W, 3]
         imgs: List of RGB images [N, H, W, 3]
         masks: List of masks [N, H, W] or None
         renderer: PyTorch3D PointsRenderer
         device: torch device
-    
+
     Returns:
         images: Rendered images [num_views, H, W, 4]
     """
     imgs_np = to_numpy(imgs)
     pts3d_np = to_numpy(pts3d)
-    
+
     if masks is None:
         pts = torch.from_numpy(np.concatenate([p for p in pts3d_np])).view(-1, 3).to(device)
         col = torch.from_numpy(np.concatenate([p for p in imgs_np])).view(-1, 3).to(device)
@@ -206,8 +211,14 @@ def render_pcd(pts3d, imgs, masks, renderer, device):
         masks_np = to_numpy(masks)
         pts = torch.from_numpy(np.concatenate([p[m] for p, m in zip(pts3d_np, masks_np)])).to(device)
         col = torch.from_numpy(np.concatenate([p[m] for p, m in zip(imgs_np, masks_np)])).to(device)
-    
-    point_cloud = Pointclouds(points=[pts], features=[col]).extend(len(renderer._cameras))
+
+    # Handle PyTorch3D API change: _cameras -> rasterizer.cameras
+    if hasattr(renderer, '_cameras'):
+        num_cameras = len(renderer._cameras)
+    else:
+        num_cameras = len(renderer.rasterizer.cameras)
+
+    point_cloud = Pointclouds(points=[pts], features=[col]).extend(num_cameras)
     images = renderer(point_cloud)
     return images
 
@@ -266,11 +277,11 @@ def run_diffusion_chunks(render_results, diffusion_model, num_frames, ddim_steps
         h, w = 576 // 8, 1024 // 8
         noise_shape = [1, diffusion_model.model.diffusion_model.out_channels, chunk_size, h, w]
         
-        with torch.no_grad(), torch.cuda.amp.autocast():
+        with torch.no_grad(), torch.amp.autocast('cuda'):
             batch_samples = image_guided_synthesis(
                 diffusion_model, ['Rotating view of a scene'], videos, noise_shape,
                 n_samples=1, ddim_steps=ddim_steps, ddim_eta=1.0,
-                unconditional_guidance_scale=7.5, cfg_img=None, frame_stride=10,
+                unconditional_guidance_scale=7.5, cfg_img=None, fs=10,
                 text_input=True, multiple_cond_cfg=False, timestep_spacing='uniform_trailing',
                 guidance_rescale=0.7, condition_index=[0]
             )
