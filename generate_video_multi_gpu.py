@@ -3,14 +3,17 @@
 Multi-GPU batch processing: Generate 30fps videos from 4 sparse frames using ViewCrafter.
 
 Usage:
-    # Use all available GPUs
+    # Process all scenes with all available GPUs
     python generate_video_multi_gpu.py --data_dir /path/to/data --output_dir /path/to/output
 
     # Use specific GPUs
     python generate_video_multi_gpu.py --data_dir /path/to/data --output_dir /path/to/output --gpus 0,1,2,3
 
-    # Process a range of scenes
-    python generate_video_multi_gpu.py --data_dir /path/to/data --output_dir /path/to/output --start 21000 --end 21200 --gpus 0,1
+    # Process a single range of scenes
+    python generate_video_multi_gpu.py --data_dir /path/to/data --output_dir /path/to/output --ranges "100:200"
+
+    # Process multiple ranges (use -1 for open-ended ranges)
+    python generate_video_multi_gpu.py --data_dir /path/to/data --output_dir /path/to/output --ranges "100:200,250:-1" --gpus 0,1,2,3
 """
 
 import sys
@@ -41,18 +44,84 @@ from video_generation_utils import load_diffusion_model, process_single_scene
 console = Console()
 
 
-def find_scenes(data_dir, start=None, end=None):
+def parse_ranges(ranges_str):
+    """
+    Parse range specification string into list of (start, end) tuples.
+
+    Args:
+        ranges_str: String like "100:200,250:-1" where -1 means open-ended
+
+    Returns:
+        List of (start, end) tuples. end=None means open-ended.
+
+    Examples:
+        "100:200" -> [(100, 200)]
+        "100:200,250:-1" -> [(100, 200), (250, None)]
+        "0:50,100:150,200:-1" -> [(0, 50), (100, 150), (200, None)]
+    """
+    if not ranges_str:
+        return [(None, None)]
+
+    ranges = []
+    for range_part in ranges_str.split(','):
+        range_part = range_part.strip()
+        if ':' not in range_part:
+            raise ValueError(f"Invalid range format: {range_part}. Expected 'start:end'")
+
+        start_str, end_str = range_part.split(':', 1)
+        start = int(start_str.strip()) if start_str.strip() else None
+        end_val = end_str.strip()
+
+        if end_val == '-1' or end_val == '':
+            end = None
+        else:
+            end = int(end_val)
+
+        ranges.append((start, end))
+
+    return ranges
+
+
+def in_ranges(scene_id, ranges):
+    """
+    Check if a scene_id falls within any of the specified ranges.
+
+    Args:
+        scene_id: Scene ID to check
+        ranges: List of (start, end) tuples
+
+    Returns:
+        True if scene_id is in any range, False otherwise
+    """
+    if ranges == [(None, None)]:
+        return True
+
+    for start, end in ranges:
+        # Check lower bound
+        if start is not None and scene_id < start:
+            continue
+        # Check upper bound
+        if end is not None and scene_id >= end:
+            continue
+        return True
+
+    return False
+
+
+def find_scenes(data_dir, ranges=None):
     """
     Find all scene directories in the data directory.
 
     Args:
         data_dir: Root data directory
-        start: Start scene ID (inclusive)
-        end: End scene ID (exclusive)
+        ranges: List of (start, end) tuples for filtering. None means all scenes.
 
     Returns:
         List of (scene_id, scene_path) tuples
     """
+    if ranges is None:
+        ranges = [(None, None)]
+
     all_scenes = []
 
     for item in sorted(os.listdir(data_dir)):
@@ -63,31 +132,26 @@ def find_scenes(data_dir, start=None, end=None):
             # Check if scene has an images directory
             images_dir = os.path.join(item_path, 'images')
             if os.path.exists(images_dir):
-                # Apply range filter if specified
-                if start is not None and scene_id < start:
-                    continue
-                if end is not None and scene_id >= end:
-                    continue
-
-                all_scenes.append((scene_id, item_path))
+                # Apply range filter
+                if in_ranges(scene_id, ranges):
+                    all_scenes.append((scene_id, item_path))
 
     return all_scenes
 
 
-def find_pending_scenes(data_dir, output_dir, start=None, end=None):
+def find_pending_scenes(data_dir, output_dir, ranges=None):
     """
     Find scenes that haven't been processed yet (no mp4 file in output_dir).
 
     Args:
         data_dir: Root data directory
         output_dir: Output directory for videos
-        start: Start scene ID (inclusive)
-        end: End scene ID (exclusive)
+        ranges: List of (start, end) tuples for filtering
 
     Returns:
         List of scene_id integers for scenes that need processing
     """
-    all_scenes = find_scenes(data_dir, start, end)
+    all_scenes = find_scenes(data_dir, ranges)
     pending = []
 
     for scene_id, scene_path in all_scenes:
@@ -367,8 +431,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_dir', type=str, required=True, help='Root directory containing scene subdirectories')
     parser.add_argument('--output_dir', type=str, required=True, help='Output directory for videos')
-    parser.add_argument('--start', type=int, default=None, help='Start scene ID (inclusive)')
-    parser.add_argument('--end', type=int, default=None, help='End scene ID (exclusive)')
+    parser.add_argument('--ranges', type=str, default=None, help='Comma-separated ranges (e.g., "100:200,250:-1"). Use -1 for open-ended. If not specified, processes all scenes.')
     parser.add_argument('--gpus', type=str, default=None, help='Comma-separated GPU IDs (e.g., "0,1,2,3"). If not specified, uses all available GPUs.')
     parser.add_argument('--ckpt_path', type=str, default='./checkpoints/model_sparse.ckpt')
     parser.add_argument('--dust3r_path', type=str, default='./checkpoints/DUSt3R_ViTLarge_BaseDecoder_512_dpt.pth')
@@ -389,6 +452,9 @@ def main():
             return
         gpu_ids = list(range(gpu_count))
 
+    # Parse ranges
+    ranges = parse_ranges(args.ranges) if args.ranges else None
+
     # Print header
     console.print("\n[bold magenta]╔═══════════════════════════════════════════════════════════════╗[/bold magenta]")
     console.print("[bold magenta]║[/bold magenta]     [bold cyan]ViewCrafter Multi-GPU Batch Video Generation[/bold cyan]        [bold magenta]║[/bold magenta]")
@@ -399,7 +465,7 @@ def main():
 
     # Find pending scenes
     console.print("[bold cyan]Scanning for pending scenes...[/bold cyan]")
-    pending_scenes = find_pending_scenes(args.data_dir, args.output_dir, start=args.start, end=args.end)
+    pending_scenes = find_pending_scenes(args.data_dir, args.output_dir, ranges=ranges)
 
     if not pending_scenes:
         console.print(f"[green]No pending scenes found. All scenes already processed![/green]")
@@ -407,8 +473,9 @@ def main():
 
     # Print info
     console.print(f"[bold]Found {len(pending_scenes)} pending scenes[/bold]")
-    if args.start or args.end:
-        console.print(f"Range filter: {args.start or 'start'} to {args.end or 'end'}")
+    if ranges and ranges != [(None, None)]:
+        ranges_str = ", ".join([f"[{s if s is not None else '0'}:{e if e is not None else '∞'})" for s, e in ranges])
+        console.print(f"Range filter: {ranges_str}")
     console.print(f"Data directory: [cyan]{args.data_dir}[/cyan]")
     console.print(f"Output directory: [cyan]{args.output_dir}[/cyan]")
     console.print(f"Using GPUs: [cyan]{', '.join(map(str, gpu_ids))}[/cyan]\n")
