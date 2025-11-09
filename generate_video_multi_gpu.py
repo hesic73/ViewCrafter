@@ -97,13 +97,20 @@ def in_ranges(scene_id, ranges):
         return True
 
     for start, end in ranges:
+        # Check if scene_id is within this range
+        in_range = True
+        
         # Check lower bound
         if start is not None and scene_id < start:
-            continue
+            in_range = False
+        
         # Check upper bound
         if end is not None and scene_id >= end:
-            continue
-        return True
+            in_range = False
+        
+        # If scene_id is in this range, return True
+        if in_range:
+            return True
 
     return False
 
