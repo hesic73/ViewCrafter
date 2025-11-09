@@ -140,7 +140,12 @@ pip install torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorc
 
 pip install -r requirements.txt
 
+# tested on cuda 11.9
+pip install xformers --index-url https://download.pytorch.org/whl/cu118
+
+# or maybe
 pip install -v --no-build-isolation -U git+https://github.com/facebookresearch/xformers.git@main#egg=xformers
+
 pip install git+https://github.com/mlfoundations/open_clip.git@v2.17.1
 
 # Install PyTorch3D
