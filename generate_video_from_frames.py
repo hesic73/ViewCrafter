@@ -79,7 +79,7 @@ def main():
     console.print(f"\n[bold cyan]Saving video...[/bold cyan]")
     start_save = time.time()
     Path(args.output_path).parent.mkdir(parents=True, exist_ok=True)
-    save_video((diffusion_results + 1.0) / 2.0, args.output_path)
+    save_video((diffusion_results + 1.0) / 2.0, args.output_path, fps=30)
     save_time = time.time() - start_save
 
     total_time = time.time() - start_total

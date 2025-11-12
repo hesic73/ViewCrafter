@@ -190,7 +190,7 @@ def main():
 
                 # Save video
                 output_path = os.path.join(args.output_dir, f"{scene_id}.mp4")
-                save_video((diffusion_results + 1.0) / 2.0, output_path)
+                save_video((diffusion_results + 1.0) / 2.0, output_path, fps=30)
 
                 all_stats.append(stats)
                 successful += 1
