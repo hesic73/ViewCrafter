@@ -284,7 +284,7 @@ def worker_process(gpu_id, task_queue, status_dict, data_dir, output_dir, args):
 
                 # Save video
                 output_path = os.path.join(output_dir, f"{scene_id}.mp4")
-                save_video((diffusion_results + 1.0) / 2.0, output_path)
+                save_video((diffusion_results + 1.0) / 2.0, output_path, fps=30)
 
                 # Update status - success
                 current = status_dict[gpu_id]
